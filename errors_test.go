@@ -56,6 +56,18 @@ func TestClassifyErrorEmptyBody(t *testing.T) {
 	}
 }
 
+func TestClassifyErrorDescriptionFallback(t *testing.T) {
+	body := []byte(`{"code":1030,"description":"Authorization Failure. The access token is either invalid or has expired."}`)
+	err := classifyError(http.StatusUnauthorized, nil, body)
+	var ae *AuthError
+	if !errors.As(err, &ae) {
+		t.Fatalf("expected *AuthError, got %T", err)
+	}
+	if ae.Base.Message == "" || ae.Base.Code != 1030 {
+		t.Errorf("expected description-derived message with code=1030, got base=%+v", ae.Base)
+	}
+}
+
 func TestErrorMessages(t *testing.T) {
 	cases := []error{
 		&AuthError{Base: Error{Status: 401}},

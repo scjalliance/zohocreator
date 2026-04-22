@@ -20,3 +20,4 @@ vendor/
 
 # Session-local working memory
 .remember/
+.claude/

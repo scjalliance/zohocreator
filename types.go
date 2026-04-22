@@ -33,12 +33,17 @@ const (
 // codeEnvelope is the common JSON prefix for nearly every Creator response.
 // Individual endpoints add fields like data / result / details / forms /
 // reports / fields etc.; we decode those in the endpoint-specific methods.
+//
+// Note: Zoho's auth failures return the server-side reason under
+// "description" rather than "message" — we carry both so callers (and the
+// error classifier) always see a populated field.
 type codeEnvelope struct {
-	Code    int             `json:"code"`
-	Message string          `json:"message,omitempty"`
-	Details json.RawMessage `json:"details,omitempty"`
-	Data    json.RawMessage `json:"data,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
+	Code        int             `json:"code"`
+	Message     string          `json:"message,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Details     json.RawMessage `json:"details,omitempty"`
+	Data        json.RawMessage `json:"data,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
 }
 
 // Record is a dynamically-typed Creator record. Field link names map to their
