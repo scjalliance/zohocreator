@@ -33,6 +33,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -480,6 +481,7 @@ func writeCSV(rows []zohocreator.Record) {
 			}
 		}
 	}
+	sort.Strings(fields)
 	fmt.Println(strings.Join(fields, ","))
 	for _, r := range rows {
 		cells := make([]string, len(fields))
@@ -491,7 +493,7 @@ func writeCSV(rows []zohocreator.Record) {
 }
 
 func csvEscape(s string) string {
-	if !strings.ContainsAny(s, `",`+"\n") {
+	if !strings.ContainsAny(s, `",`+"\r\n") {
 		return s
 	}
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
@@ -581,18 +583,27 @@ func downloadCmd(ctx context.Context, c *zohocreator.Client, args []string) {
 	_ = fs.Parse(args[5:])
 	owner, app, rpt, id, field := args[0], args[1], args[2], args[3], args[4]
 
-	var dst io.Writer
-	if *out == "" {
+	var (
+		dst     io.Writer
+		closer  *os.File
+		outPath = *out
+	)
+	if outPath == "" {
 		dst = os.Stdout
 	} else {
-		f, err := os.Create(*out)
+		f, err := os.Create(outPath)
 		if err != nil {
-			fatal("create %s: %v", *out, err)
+			fatal("create %s: %v", outPath, err)
 		}
-		defer func() { _ = f.Close() }()
+		closer = f
 		dst = f
 	}
 	fn, n, err := c.Files.Download(ctx, owner, app, rpt, id, field, *privatelink, dst)
+	if closer != nil {
+		if cerr := closer.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}
 	if err != nil {
 		fatal("download: %v", err)
 	}

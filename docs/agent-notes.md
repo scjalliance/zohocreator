@@ -152,9 +152,10 @@ for {
     if err != nil { return err }
     switch job.Status {
     case "Completed":
-        f, _ := os.Create("out.zip")
-        defer f.Close()
+        f, err := os.Create("out.zip")
+        if err != nil { return err }
         _, err = client.Bulk.DownloadResult(ctx, owner, app, rpt, job.ID, f)
+        if cerr := f.Close(); err == nil { err = cerr }
         return err
     case "Failed":
         return fmt.Errorf("bulk job failed")

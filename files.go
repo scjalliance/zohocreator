@@ -138,6 +138,8 @@ func (s *FileService) downloadPath(ctx context.Context, path, privatelink string
 }
 
 // parseFilename extracts the filename from a Content-Disposition header.
+// mime.ParseMediaType decodes RFC 2231-encoded `filename*` parameters and
+// stores the decoded value under the plain `filename` key.
 func parseFilename(cd string) string {
 	if cd == "" {
 		return ""
@@ -146,8 +148,5 @@ func parseFilename(cd string) string {
 	if err != nil {
 		return ""
 	}
-	if v, ok := params["filename"]; ok {
-		return v
-	}
-	return params["filename*"]
+	return params["filename"]
 }
