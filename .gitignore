@@ -1,0 +1,22 @@
+.secrets/
+*.env
+*.env.local
+/bin/
+/dist/
+/build/
+
+# Go
+*.test
+*.out
+coverage.out
+vendor/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Session-local working memory
+.remember/
