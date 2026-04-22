@@ -78,7 +78,7 @@ type Field struct {
 //
 // Requires scope ZohoCreator.dashboard.READ.
 func (m *MetaService) Applications(ctx context.Context) ([]Application, error) {
-	return m.applications(ctx, "/v2.1/meta/applications")
+	return m.applications(ctx, "/meta/applications")
 }
 
 // ApplicationsByWorkspace returns the applications owned by the given
@@ -88,7 +88,7 @@ func (m *MetaService) ApplicationsByWorkspace(ctx context.Context, owner string)
 	if owner == "" {
 		return nil, fmt.Errorf("owner is required")
 	}
-	return m.applications(ctx, "/v2.1/meta/"+url.PathEscape(owner)+"/applications")
+	return m.applications(ctx, "/meta/"+url.PathEscape(owner)+"/applications")
 }
 
 func (m *MetaService) applications(ctx context.Context, path string) ([]Application, error) {
@@ -113,7 +113,7 @@ func (m *MetaService) Forms(ctx context.Context, owner, app string) ([]Form, err
 	if owner == "" || app == "" {
 		return nil, fmt.Errorf("owner and app are required")
 	}
-	path := fmt.Sprintf("/v2.1/meta/%s/%s/forms", url.PathEscape(owner), url.PathEscape(app))
+	path := fmt.Sprintf("/meta/%s/%s/forms", url.PathEscape(owner), url.PathEscape(app))
 	res, err := m.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
 		return nil, err
@@ -133,7 +133,7 @@ func (m *MetaService) Reports(ctx context.Context, owner, app string) ([]Report,
 	if owner == "" || app == "" {
 		return nil, fmt.Errorf("owner and app are required")
 	}
-	path := fmt.Sprintf("/v2.1/meta/%s/%s/reports", url.PathEscape(owner), url.PathEscape(app))
+	path := fmt.Sprintf("/meta/%s/%s/reports", url.PathEscape(owner), url.PathEscape(app))
 	res, err := m.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (m *MetaService) Pages(ctx context.Context, owner, app string) ([]AppPage, 
 	if owner == "" || app == "" {
 		return nil, fmt.Errorf("owner and app are required")
 	}
-	path := fmt.Sprintf("/v2.1/meta/%s/%s/pages", url.PathEscape(owner), url.PathEscape(app))
+	path := fmt.Sprintf("/meta/%s/%s/pages", url.PathEscape(owner), url.PathEscape(app))
 	res, err := m.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
 		return nil, err
@@ -173,7 +173,7 @@ func (m *MetaService) Sections(ctx context.Context, owner, app string) ([]Sectio
 	if owner == "" || app == "" {
 		return nil, fmt.Errorf("owner and app are required")
 	}
-	path := fmt.Sprintf("/v2.1/meta/%s/%s/sections", url.PathEscape(owner), url.PathEscape(app))
+	path := fmt.Sprintf("/meta/%s/%s/sections", url.PathEscape(owner), url.PathEscape(app))
 	res, err := m.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
 		return nil, err
@@ -194,7 +194,7 @@ func (m *MetaService) Fields(ctx context.Context, owner, app, form string) ([]Fi
 	if owner == "" || app == "" || form == "" {
 		return nil, fmt.Errorf("owner, app, and form are required")
 	}
-	path := fmt.Sprintf("/v2.1/meta/%s/%s/form/%s/fields",
+	path := fmt.Sprintf("/meta/%s/%s/form/%s/fields",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(form))
 	res, err := m.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {

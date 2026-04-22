@@ -59,7 +59,7 @@ func (s *FileService) Upload(ctx context.Context, owner, app, report, recordID, 
 		return nil, fmt.Errorf("close multipart writer: %w", err)
 	}
 
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s/%s/upload",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s/%s/upload",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report),
 		url.PathEscape(recordID), url.PathEscape(field))
 
@@ -94,7 +94,7 @@ func (s *FileService) Download(ctx context.Context, owner, app, report, recordID
 	if dst == nil {
 		return "", 0, fmt.Errorf("dst writer is required")
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s/%s/download",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s/%s/download",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report),
 		url.PathEscape(recordID), url.PathEscape(field))
 	return s.downloadPath(ctx, path, privatelink, dst)
@@ -108,7 +108,7 @@ func (s *FileService) DownloadSubform(ctx context.Context, owner, app, report, r
 	if dst == nil {
 		return "", 0, fmt.Errorf("dst writer is required")
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s/%s/%s/%s/download",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s/%s/%s/%s/download",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report),
 		url.PathEscape(recordID), url.PathEscape(subform),
 		url.PathEscape(field), url.PathEscape(subformRecordID))

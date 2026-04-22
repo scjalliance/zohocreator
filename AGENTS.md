@@ -25,6 +25,21 @@ Upstream docs: <https://www.zoho.com/creator/help/api/v2.1/>. Upstream has per-e
 - `bulk.go` — `Create` → `Status` → `DownloadResult` lifecycle for Bulk Read jobs.
 - `customapi.go` — user-defined custom API invocation with OAuth or `publickey` modes.
 
+## v2 vs v2.1
+
+Both revisions are live. Creator 6 tenants speak v2.1, Creator 5 tenants speak v2. The client targets v2.1 by default; set `Config.APIVersion = zohocreator.APIVersionV2` for legacy tenants.
+
+Concrete differences handled inside the library:
+
+1. URL prefix: `/creator/v2.1/` vs `/creator/v2/`. `/meta/applications` works on both; per-app endpoints are version-strict.
+2. Pagination: v2.1 returns a `record_cursor` response header, client resends it in the request header. v2 uses `from`/`limit` offsets; we default `limit` to 200 and stop when the server returns fewer items than `limit`.
+3. Request body: v2 rejects `skip_workflow` — dropped automatically when `APIVersion == v2`.
+4. Request query: v2 rejects `max_records` / `field_config` / `fields` — dropped automatically.
+5. Environment header: v2 rejects the `environment` header with a misleading `UPLOAD_RULE_NOT_CONFIGURED` 404. We suppress it on v2.
+6. Criteria, skip/limit semantics, JSON shape of records, and OAuth scopes are otherwise identical between versions.
+
+If a Creator 5 tenant's `/forms` returns `{"code":2930,"message":"UPLOAD_RULE_NOT_CONFIGURED"}`, the first thing to check is `Config.APIVersion` — 95% of the time the caller is on v2.1 but the workspace isn't migrated.
+
 ## Zoho Creator Quirks Worth Remembering
 
 1. **JSON case varies.** Meta types use snake_case (`display_name`, `link_name`). Record field values echo back under their raw link names (user-authored, often TitleCase or CamelCase).

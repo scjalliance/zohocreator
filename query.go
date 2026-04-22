@@ -79,8 +79,18 @@ func (q *Query) Set(key, value string) *Query {
 	return q
 }
 
-// buildParams returns the URL-encoded query string parameters.
+// buildParams returns the URL-encoded query string parameters using v2.1
+// semantics. Prefer buildParamsForVersion when the caller has a specific
+// APIVersion in hand.
 func (q *Query) buildParams() url.Values {
+	return q.buildParamsForVersion(APIVersionV21)
+}
+
+// buildParamsForVersion returns the URL-encoded query string parameters,
+// omitting fields the given API version doesn't accept. On v2, the server
+// rejects max_records/field_config/fields so we silently drop them rather
+// than surface a confusing 400 to the caller.
+func (q *Query) buildParamsForVersion(version APIVersion) url.Values {
 	v := url.Values{}
 	if q == nil {
 		return v
@@ -91,17 +101,19 @@ func (q *Query) buildParams() url.Values {
 	if q.Limit > 0 {
 		v.Set("limit", strconv.Itoa(q.Limit))
 	}
-	if q.MaxRecords > 0 {
-		v.Set("max_records", strconv.Itoa(q.MaxRecords))
-	}
 	if q.Criteria != "" {
 		v.Set("criteria", q.Criteria)
 	}
-	if q.FieldConfig != "" {
-		v.Set("field_config", string(q.FieldConfig))
-	}
-	if len(q.Fields) > 0 {
-		v.Set("fields", strings.Join(q.Fields, ","))
+	if version != APIVersionV2 {
+		if q.MaxRecords > 0 {
+			v.Set("max_records", strconv.Itoa(q.MaxRecords))
+		}
+		if q.FieldConfig != "" {
+			v.Set("field_config", string(q.FieldConfig))
+		}
+		if len(q.Fields) > 0 {
+			v.Set("fields", strings.Join(q.Fields, ","))
+		}
 	}
 	for k, vals := range q.Extra {
 		for _, val := range vals {

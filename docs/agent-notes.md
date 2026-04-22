@@ -15,6 +15,15 @@ client, err := zohocreator.NewClient(zohocreator.Config{
 
 Everything else hangs off `client.<Service>.<Method>`.
 
+## API version
+
+Set `Config.APIVersion`:
+
+- `zohocreator.APIVersionV21` (default) — Creator 6 tenants.
+- `zohocreator.APIVersionV2` — Creator 5 legacy tenants.
+
+Client auto-adjusts URL prefix, pagination style, body/query keys, and the `environment` header. Symptom of wrong version on Creator 5: `{"code":2930,"message":"UPLOAD_RULE_NOT_CONFIGURED"}` on `/forms` while `/applications` works.
+
 ## Pattern Recognition
 
 - **Pages**: list endpoints return `*Page[T]` with `Cursor`, `Items`, `HasNext()`, `NextPage(ctx)`, `Iter(ctx)`, `Collect(ctx)`.

@@ -137,7 +137,8 @@ Custom APIs:
 
 Environment:
   ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ACCESS_TOKEN,
-  ZOHO_DATA_CENTER (us|eu|in|au|jp|ca|cn|sa|ae), ZOHO_ENV (production|stage|development)`)
+  ZOHO_DATA_CENTER (us|eu|in|au|jp|ca|cn|sa|ae), ZOHO_ENV (production|stage|development),
+  ZOHO_API_VERSION (v2.1 default; v2 for legacy Creator 5 tenants)`)
 }
 
 func runWithClient(ctx context.Context, args []string, fn func(context.Context, *zohocreator.Client, []string)) {
@@ -161,6 +162,7 @@ func buildClient() (*zohocreator.Client, error) {
 		RefreshToken: os.Getenv("ZOHO_REFRESH_TOKEN"),
 		AccessToken:  os.Getenv("ZOHO_ACCESS_TOKEN"),
 		Environment:  zohocreator.Environment(envOr("ZOHO_ENV", string(zohocreator.EnvProduction))),
+		APIVersion:   zohocreator.APIVersion(envOr("ZOHO_API_VERSION", string(zohocreator.APIVersionV21))),
 	}
 	return zohocreator.NewClient(cfg)
 }
@@ -417,7 +419,15 @@ func recordsCmd(ctx context.Context, c *zohocreator.Client, args []string) {
 		fatal("records: %v", err)
 	}
 	if page.HasNext() {
-		fmt.Fprintf(os.Stderr, "(next cursor: %s — pass -cursor or use -all)\n", page.Cursor)
+		if page.Cursor != "" {
+			fmt.Fprintf(os.Stderr, "(next cursor: %s — pass -cursor or use -all)\n", page.Cursor)
+		} else {
+			nextFrom := *from + len(page.Items)
+			if *limit > 0 {
+				nextFrom = *from + *limit
+			}
+			fmt.Fprintf(os.Stderr, "(more records available — pass -from %d or use -all)\n", nextFrom)
+		}
 	}
 	emitSlice(page.Items, *outFmt)
 }

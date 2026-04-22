@@ -225,6 +225,13 @@ func (c *Client) do(ctx context.Context, opts requestOptions) (*doResult, error)
 }
 
 // resolveURL builds the full request URL from a path + query.
+//
+// Paths that start with "/v2.1/" or "/v2/" are used verbatim (just
+// /creator-prefixed). Paths that start with any other segment — most
+// commonly "/data/", "/meta/", "/publish/", "/bulk/", or "/custom/" —
+// have the client's APIVersion injected in front (except for "/custom/",
+// which is not versioned in Creator). `absolute=true` disables all
+// prefixing so callers can pass full `/creator/...` paths verbatim.
 func (c *Client) resolveURL(path string, absolute bool, query url.Values) (string, error) {
 	if strings.HasPrefix(path, "http://") || strings.HasPrefix(path, "https://") {
 		return appendQuery(path, query), nil
@@ -233,9 +240,36 @@ func (c *Client) resolveURL(path string, absolute bool, query url.Values) (strin
 		path = "/" + path
 	}
 	if !absolute {
-		path = "/creator" + path
+		path = "/creator" + c.apiPath(path)
 	}
 	return appendQuery(c.baseURL+path, query), nil
+}
+
+// apiPath inserts the API version prefix when the caller-supplied path does
+// not already carry one and is not a custom-API path. This is the single
+// place where `/v2.1/` vs `/v2/` routing is decided.
+func (c *Client) apiPath(path string) string {
+	// Already explicit.
+	if strings.HasPrefix(path, "/v2.1/") || strings.HasPrefix(path, "/v2/") {
+		return path
+	}
+	// Custom APIs are not versioned.
+	if strings.HasPrefix(path, "/custom/") {
+		return path
+	}
+	ver := c.config.APIVersion
+	if ver == "" {
+		ver = APIVersionV21
+	}
+	return "/" + string(ver) + path
+}
+
+// APIVersion returns the configured API version used for request routing.
+func (c *Client) APIVersion() APIVersion {
+	if c.config.APIVersion == "" {
+		return APIVersionV21
+	}
+	return c.config.APIVersion
 }
 
 // appendQuery safely merges extra query params into a URL string.
@@ -285,7 +319,10 @@ func (c *Client) setHeaders(ctx context.Context, req *http.Request, opts request
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	if !opts.skipEnvHeader && c.config.Environment != "" {
+	// The `environment` header is a v2.1-only concept. v2 (Creator 5)
+	// rejects requests that carry it with a generic 404, so we suppress it
+	// when the caller targets v2.
+	if !opts.skipEnvHeader && c.config.Environment != "" && c.APIVersion() != APIVersionV2 {
 		req.Header.Set("environment", string(c.config.Environment))
 	}
 
