@@ -180,21 +180,35 @@ func TestClientRateLimitRetry(t *testing.T) {
 }
 
 func TestResolveURL(t *testing.T) {
-	c := &Client{baseURL: "https://host"}
-	u, err := c.resolveURL("/v2.1/meta/applications", false, nil)
+	// Default (v2.1).
+	c := &Client{baseURL: "https://host", config: Config{APIVersion: APIVersionV21}}
+	u, err := c.resolveURL("/meta/applications", false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if u != "https://host/creator/v2.1/meta/applications" {
-		t.Errorf("got %q", u)
+		t.Errorf("v2.1 injection got %q", u)
 	}
-	u, _ = c.resolveURL("https://foo/x", false, nil)
-	if u != "https://foo/x" {
-		t.Errorf("absolute URL mangled: %q", u)
+	// Explicit v2.
+	c = &Client{baseURL: "https://host", config: Config{APIVersion: APIVersionV2}}
+	u, _ = c.resolveURL("/meta/applications", false, nil)
+	if u != "https://host/creator/v2/meta/applications" {
+		t.Errorf("v2 injection got %q", u)
 	}
+	// Custom API (no version).
 	u, _ = c.resolveURL("/custom/admin/myapi", false, nil)
 	if u != "https://host/creator/custom/admin/myapi" {
 		t.Errorf("custom path: %q", u)
+	}
+	// Path with explicit version is left alone.
+	u, _ = c.resolveURL("/v2.1/meta/applications", false, nil)
+	if u != "https://host/creator/v2.1/meta/applications" {
+		t.Errorf("explicit v2.1: %q", u)
+	}
+	// Absolute URL passes through.
+	u, _ = c.resolveURL("https://foo/x", false, nil)
+	if u != "https://foo/x" {
+		t.Errorf("absolute URL mangled: %q", u)
 	}
 }
 

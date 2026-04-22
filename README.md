@@ -61,6 +61,25 @@ go run ./cmd/zc oauth exchange <code> -client <client_id> -secret <client_secret
 
 Only the refresh token is long-lived; access tokens are auto-refreshed by the client (60s early-refresh window by default). If you operate tokens externally, seed a static access token via `Config.AccessToken` and omit `RefreshToken` — no refresh will happen.
 
+## API versions
+
+Zoho Creator has two REST revisions live today:
+
+- **v2.1** (default) — targets Creator 6 tenants. Cursor pagination via the `record_cursor` header, supports `max_records` / `field_config` / `fields` / `skip_workflow`, and requires the `environment` header.
+- **v2** — legacy Creator 5 tenants. Offset pagination via `from`/`limit`, no `environment` header (sending it triggers a generic `UPLOAD_RULE_NOT_CONFIGURED` 404), and the v2.1-only knobs are silently dropped if you set them.
+
+Pick the one matching your workspace. `/meta/applications` is the only endpoint that works across both on either host — the per-app endpoints are strict.
+
+```go
+client, _ := zohocreator.NewClient(zohocreator.Config{
+    DataCenter: zohocreator.DCUS,
+    APIVersion: zohocreator.APIVersionV2, // or APIVersionV21 (default)
+    // ...auth...
+})
+```
+
+Or via the CLI: `ZOHO_API_VERSION=v2`.
+
 ## Data centers
 
 Pass the matching `DataCenter` constant:

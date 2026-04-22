@@ -59,7 +59,7 @@ func (s *BulkService) Create(ctx context.Context, owner, app, report string, que
 	} else {
 		body["query"] = map[string]any{}
 	}
-	path := fmt.Sprintf("/v2.1/bulk/%s/%s/report/%s/read",
+	path := fmt.Sprintf("/bulk/%s/%s/report/%s/read",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodPost,
@@ -77,7 +77,7 @@ func (s *BulkService) Status(ctx context.Context, owner, app, report, jobID stri
 	if owner == "" || app == "" || report == "" || jobID == "" {
 		return nil, fmt.Errorf("owner, app, report, and jobID are required")
 	}
-	path := fmt.Sprintf("/v2.1/bulk/%s/%s/report/%s/read/%s",
+	path := fmt.Sprintf("/bulk/%s/%s/report/%s/read/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(jobID))
 	res, err := s.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
@@ -96,7 +96,7 @@ func (s *BulkService) DownloadResult(ctx context.Context, owner, app, report, jo
 	if dst == nil {
 		return 0, fmt.Errorf("dst writer is required")
 	}
-	path := fmt.Sprintf("/v2.1/bulk/%s/%s/report/%s/read/%s/result",
+	path := fmt.Sprintf("/bulk/%s/%s/report/%s/read/%s/result",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(jobID))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodGet,

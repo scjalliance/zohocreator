@@ -65,11 +65,11 @@ func (s *RecordService) Add(ctx context.Context, owner, app, form string, record
 		if len(result) > 0 {
 			body["result"] = result
 		}
-		if len(opts.SkipWorkflow) > 0 {
+		if len(opts.SkipWorkflow) > 0 && s.client.APIVersion() != APIVersionV2 {
 			body["skip_workflow"] = opts.SkipWorkflow
 		}
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/form/%s",
+	path := fmt.Sprintf("/data/%s/%s/form/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(form))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodPost,
@@ -95,7 +95,7 @@ func (s *RecordService) Get(ctx context.Context, owner, app, report string, q *Q
 	if owner == "" || app == "" || report == "" {
 		return nil, fmt.Errorf("owner, app, and report are required")
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report))
 	return fetchPage[Record](ctx, s.client, path, q, "data")
 }
@@ -121,7 +121,7 @@ func (s *RecordService) GetByID(ctx context.Context, owner, app, report, recordI
 	if owner == "" || app == "" || report == "" || recordID == "" {
 		return nil, fmt.Errorf("owner, app, report, and recordID are required")
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(recordID))
 	res, err := s.client.do(ctx, requestOptions{method: http.MethodGet, path: path})
 	if err != nil {
@@ -164,7 +164,7 @@ func (s *RecordService) UpdateByID(ctx context.Context, owner, app, report, reco
 		return nil, fmt.Errorf("owner, app, report, and recordID are required")
 	}
 	body := s.buildUpdateBody(record, opts, false)
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(recordID))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodPatch,
@@ -196,7 +196,7 @@ func (s *RecordService) UpdateMany(ctx context.Context, owner, app, report strin
 		return nil, fmt.Errorf("opts.Criteria is required for UpdateMany")
 	}
 	body := s.buildUpdateBody(record, opts, true)
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodPatch,
@@ -232,7 +232,7 @@ func (s *RecordService) buildUpdateBody(record Record, opts *UpdateOptions, bulk
 		if len(result) > 0 {
 			body["result"] = result
 		}
-		if len(opts.SkipWorkflow) > 0 {
+		if len(opts.SkipWorkflow) > 0 && s.client.APIVersion() != APIVersionV2 {
 			body["skip_workflow"] = opts.SkipWorkflow
 		}
 		if bulk && opts.Criteria != "" {
@@ -271,11 +271,11 @@ func (s *RecordService) DeleteByID(ctx context.Context, owner, app, report, reco
 		if opts.Message {
 			body["result"] = map[string]any{"message": true}
 		}
-		if len(opts.SkipWorkflow) > 0 {
+		if len(opts.SkipWorkflow) > 0 && s.client.APIVersion() != APIVersionV2 {
 			body["skip_workflow"] = opts.SkipWorkflow
 		}
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(recordID))
 	var opt requestOptions
 	opt.method = http.MethodDelete
@@ -310,10 +310,10 @@ func (s *RecordService) DeleteMany(ctx context.Context, owner, app, report strin
 	if opts.Message {
 		body["result"] = map[string]any{"message": true}
 	}
-	if len(opts.SkipWorkflow) > 0 {
+	if len(opts.SkipWorkflow) > 0 && s.client.APIVersion() != APIVersionV2 {
 		body["skip_workflow"] = opts.SkipWorkflow
 	}
-	path := fmt.Sprintf("/v2.1/data/%s/%s/report/%s",
+	path := fmt.Sprintf("/data/%s/%s/report/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report))
 	res, err := s.client.do(ctx, requestOptions{
 		method: http.MethodDelete,

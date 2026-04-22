@@ -42,11 +42,11 @@ func (s *PublishService) PublishAdd(ctx context.Context, owner, app, form string
 		if len(result) > 0 {
 			body["result"] = result
 		}
-		if len(opts.SkipWorkflow) > 0 {
+		if len(opts.SkipWorkflow) > 0 && s.client.APIVersion() != APIVersionV2 {
 			body["skip_workflow"] = opts.SkipWorkflow
 		}
 	}
-	path := fmt.Sprintf("/v2.1/publish/%s/%s/form/%s",
+	path := fmt.Sprintf("/publish/%s/%s/form/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(form))
 	reqOpts := requestOptions{
 		method: http.MethodPost,
@@ -76,7 +76,7 @@ func (s *PublishService) PublishGet(ctx context.Context, owner, app, report stri
 	if owner == "" || app == "" || report == "" {
 		return nil, fmt.Errorf("owner, app, and report are required")
 	}
-	path := fmt.Sprintf("/v2.1/publish/%s/%s/report/%s",
+	path := fmt.Sprintf("/publish/%s/%s/report/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report))
 	return fetchPublishPage(ctx, s.client, path, q, privatelink)
 }
@@ -102,7 +102,7 @@ func (s *PublishService) PublishGetByID(ctx context.Context, owner, app, report,
 	if owner == "" || app == "" || report == "" || recordID == "" {
 		return nil, fmt.Errorf("owner, app, report, and recordID are required")
 	}
-	path := fmt.Sprintf("/v2.1/publish/%s/%s/report/%s/%s",
+	path := fmt.Sprintf("/publish/%s/%s/report/%s/%s",
 		url.PathEscape(owner), url.PathEscape(app), url.PathEscape(report), url.PathEscape(recordID))
 	opts := requestOptions{method: http.MethodGet, path: path}
 	if privatelink != "" {
@@ -124,8 +124,9 @@ func (s *PublishService) PublishGetByID(ctx context.Context, owner, app, report,
 }
 
 func fetchPublishPage(ctx context.Context, c *Client, path string, q *Query, privatelink string) (*Page[Record], error) {
+	version := c.APIVersion()
 	nq := q.clone()
-	params := nq.buildParams()
+	params := nq.buildParamsForVersion(version)
 	if privatelink != "" {
 		if params == nil {
 			params = url.Values{}
@@ -133,8 +134,20 @@ func fetchPublishPage(ctx context.Context, c *Client, path string, q *Query, pri
 		params.Set("privatelink", privatelink)
 	}
 	headers := http.Header{}
-	if nq.RecordCursor != "" {
+	if version == APIVersionV21 && nq.RecordCursor != "" {
 		headers.Set("record_cursor", nq.RecordCursor)
+	}
+	if version == APIVersionV2 {
+		if nq.Limit <= 0 {
+			nq.Limit = 200
+			params.Set("limit", "200")
+		}
+		if nq.From < 0 {
+			nq.From = 0
+		}
+		if _, ok := params["from"]; !ok && nq.From > 0 {
+			params.Set("from", intStr(nq.From))
+		}
 	}
 	opts := requestOptions{
 		method:  http.MethodGet,
@@ -149,15 +162,24 @@ func fetchPublishPage(ctx context.Context, c *Client, path string, q *Query, pri
 	if err != nil {
 		return nil, err
 	}
-	page, err := decodePage[Record](res, "data")
+	page, err := decodePage[Record](res, "data", version, nq.Limit)
 	if err != nil {
 		return nil, err
 	}
 	page.client = c
-	page.next = func(ctx context.Context, cursor string) (*Page[Record], error) {
-		nnq := q.clone()
-		nnq.RecordCursor = cursor
-		return fetchPublishPage(ctx, c, path, nnq, privatelink)
+	switch version {
+	case APIVersionV2:
+		page.next = func(ctx context.Context) (*Page[Record], error) {
+			adv := nq.clone()
+			adv.From = nq.From + nq.Limit
+			return fetchPublishPage(ctx, c, path, adv, privatelink)
+		}
+	default:
+		page.next = func(ctx context.Context) (*Page[Record], error) {
+			adv := nq.clone()
+			adv.RecordCursor = page.Cursor
+			return fetchPublishPage(ctx, c, path, adv, privatelink)
+		}
 	}
 	return page, nil
 }

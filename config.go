@@ -26,6 +26,33 @@ func (e Environment) Valid() bool {
 	return false
 }
 
+// APIVersion selects which Zoho Creator REST API revision to target.
+//
+//   - APIVersionV21 (default): Creator 6 tenants; uses cursor pagination
+//     via the `record_cursor` header and supports `max_records`,
+//     `field_config`, `fields`, and `skip_workflow`.
+//   - APIVersionV2: Creator 5 (legacy) tenants; uses offset pagination via
+//     `from`/`limit` and omits the v2.1-only knobs (which the server would
+//     reject for a legacy workspace).
+//
+// Both versions share all endpoint paths except for the `/creator/v2` vs
+// `/creator/v2.1` prefix and the response-shape differences noted above.
+type APIVersion string
+
+const (
+	APIVersionV21 APIVersion = "v2.1"
+	APIVersionV2  APIVersion = "v2"
+)
+
+// Valid reports whether v is a recognised API version.
+func (v APIVersion) Valid() bool {
+	switch v {
+	case APIVersionV21, APIVersionV2, "":
+		return true
+	}
+	return false
+}
+
 // Config is the input to NewClient. Most fields have sensible defaults; the
 // only always-required value is an OAuth refresh token plus the corresponding
 // client-id/secret pair.
@@ -58,6 +85,11 @@ type Config struct {
 	// Environment sets the `environment` HTTP header on every request.
 	// Defaults to EnvProduction.
 	Environment Environment
+
+	// APIVersion selects the REST API revision to target. Defaults to
+	// APIVersionV21. Set APIVersionV2 for legacy Creator 5 tenants (see
+	// the APIVersion docs for the behavioural differences).
+	APIVersion APIVersion
 
 	// BaseURL overrides the derived API base (e.g. for local testing with
 	// httptest). When set it is used verbatim and must include scheme + host
@@ -107,6 +139,9 @@ func (c *Config) validate() error {
 	if !c.Environment.Valid() {
 		return fmt.Errorf("invalid Environment %q", c.Environment)
 	}
+	if !c.APIVersion.Valid() {
+		return fmt.Errorf("invalid APIVersion %q", c.APIVersion)
+	}
 	if c.MaxRetries != nil && *c.MaxRetries < 0 {
 		return fmt.Errorf("MaxRetries cannot be negative")
 	}
@@ -141,6 +176,9 @@ func (c *Config) setDefaults() {
 	}
 	if c.Environment == "" {
 		c.Environment = EnvProduction
+	}
+	if c.APIVersion == "" {
+		c.APIVersion = APIVersionV21
 	}
 	if c.TokenEarlyRefresh == 0 {
 		c.TokenEarlyRefresh = 60 * time.Second
