@@ -316,6 +316,9 @@ func classifyError(status int, header http.Header, body []byte) error {
 	base.Code = env.Code
 	base.Message = env.Message
 	if base.Message == "" {
+		base.Message = env.Description
+	}
+	if base.Message == "" {
 		base.Message = http.StatusText(status)
 	}
 	switch status {
