@@ -83,8 +83,14 @@ type Config struct {
 	AccessTokenExpiry time.Time
 
 	// Environment sets the `environment` HTTP header on every request.
-	// Defaults to EnvProduction.
+	// Defaults to EnvProduction. Ignored when DisableEnvironmentHeader is set.
 	Environment Environment
+
+	// DisableEnvironmentHeader suppresses the `environment` header entirely on
+	// v2.1 requests. Legacy Creator applications that were never migrated to
+	// the production/development environment model reject the header with code
+	// 2930 (UPLOAD_RULE_NOT_CONFIGURED); set this to talk to such apps.
+	DisableEnvironmentHeader bool
 
 	// APIVersion selects the REST API revision to target. Defaults to
 	// APIVersionV21. Set APIVersionV2 for legacy Creator 5 tenants (see
