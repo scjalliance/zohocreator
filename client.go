@@ -322,7 +322,7 @@ func (c *Client) setHeaders(ctx context.Context, req *http.Request, opts request
 	// The `environment` header is a v2.1-only concept. v2 (Creator 5)
 	// rejects requests that carry it with a generic 404, so we suppress it
 	// when the caller targets v2.
-	if !opts.skipEnvHeader && c.config.Environment != "" && c.APIVersion() != APIVersionV2 {
+	if !opts.skipEnvHeader && !c.config.DisableEnvironmentHeader && c.config.Environment != "" && c.APIVersion() != APIVersionV2 {
 		req.Header.Set("environment", string(c.config.Environment))
 	}
 

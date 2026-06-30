@@ -55,6 +55,35 @@ func TestClientHeadersAndAuth(t *testing.T) {
 	}
 }
 
+func TestClientDisableEnvironmentHeader(t *testing.T) {
+	var gotEnv string
+	var sawHeader bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnv = r.Header.Get("environment")
+		_, sawHeader = r.Header["Environment"]
+		fmt.Fprint(w, `{"code":3000,"applications":[]}`)
+	}))
+	t.Cleanup(srv.Close)
+	zero := 0
+	c, err := NewClient(Config{
+		BaseURL:                  srv.URL,
+		AccountsURL:              srv.URL,
+		AccessToken:              "test-token",
+		Environment:              EnvProduction, // set, but must be suppressed
+		DisableEnvironmentHeader: true,
+		MaxRetries:               &zero,
+	})
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if _, err := c.Meta.Applications(context.Background()); err != nil {
+		t.Fatalf("Applications: %v", err)
+	}
+	if sawHeader || gotEnv != "" {
+		t.Errorf("environment header should be absent, got %q (present=%v)", gotEnv, sawHeader)
+	}
+}
+
 func TestClientRefreshOn401(t *testing.T) {
 	var tokenCalls, apiCalls int32
 	mux := http.NewServeMux()
