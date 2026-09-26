@@ -43,6 +43,11 @@ type refreshTokenSource struct {
 	// context ends.
 	refreshSem chan struct{}
 
+	// cbMu serializes onRefresh and onInvalidate. Each callback re-checks
+	// the token state under it and skips itself if a newer change has
+	// already happened, so persisted state always ends at the latest change.
+	cbMu sync.Mutex
+
 	mu      sync.Mutex
 	current string
 	expiry  time.Time
@@ -88,10 +93,17 @@ func (r *refreshTokenSource) Token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Outside the semaphore, so a callback that calls back into the
-	// client cannot deadlock.
+	// Outside the semaphore; under cbMu, and only if no newer change has
+	// landed, so persisted state ends at the latest token.
 	if r.onRefresh != nil {
-		r.onRefresh(tok, expiry)
+		r.cbMu.Lock()
+		r.mu.Lock()
+		stillCurrent := r.current == tok
+		r.mu.Unlock()
+		if stillCurrent {
+			r.onRefresh(tok, expiry)
+		}
+		r.cbMu.Unlock()
 	}
 	return tok, nil
 }
@@ -108,7 +120,15 @@ func (r *refreshTokenSource) clearLocked() {
 	r.current = ""
 	r.expiry = time.Time{}
 	r.mu.Unlock()
-	if r.onInvalidate != nil {
+	if r.onInvalidate == nil {
+		return
+	}
+	r.cbMu.Lock()
+	defer r.cbMu.Unlock()
+	r.mu.Lock()
+	stillCleared := r.current == ""
+	r.mu.Unlock()
+	if stillCleared {
 		r.onInvalidate()
 	}
 }
