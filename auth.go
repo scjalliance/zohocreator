@@ -99,6 +99,12 @@ func (r *refreshTokenSource) Token(ctx context.Context) (string, error) {
 // Invalidate drops the cached token so the next call forces a refresh.
 func (r *refreshTokenSource) Invalidate() {
 	r.mu.Lock()
+	r.clearLocked()
+}
+
+// clearLocked drops the token and calls onInvalidate. The caller must hold
+// r.mu; clearLocked releases it before the callback runs.
+func (r *refreshTokenSource) clearLocked() {
 	r.current = ""
 	r.expiry = time.Time{}
 	r.mu.Unlock()
@@ -116,12 +122,7 @@ func (r *refreshTokenSource) invalidateIfCurrent(tok string) {
 		r.mu.Unlock()
 		return
 	}
-	r.current = ""
-	r.expiry = time.Time{}
-	r.mu.Unlock()
-	if r.onInvalidate != nil {
-		r.onInvalidate()
-	}
+	r.clearLocked()
 }
 
 // refresh posts to the accounts token endpoint and stores the new token.
