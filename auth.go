@@ -112,10 +112,15 @@ func (r *refreshTokenSource) Invalidate() {
 // the replacement.
 func (r *refreshTokenSource) invalidateIfCurrent(tok string) {
 	r.mu.Lock()
-	stale := r.current == tok
+	if r.current != tok {
+		r.mu.Unlock()
+		return
+	}
+	r.current = ""
+	r.expiry = time.Time{}
 	r.mu.Unlock()
-	if stale {
-		r.Invalidate()
+	if r.onInvalidate != nil {
+		r.onInvalidate()
 	}
 }
 

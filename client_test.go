@@ -435,8 +435,10 @@ func TestStaleRejectionKeepsReplacementToken(t *testing.T) {
 }
 
 func TestTokenWaitHonorsContext(t *testing.T) {
+	entered := make(chan struct{})
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
 		<-release
 		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
 	}))
@@ -447,7 +449,7 @@ func TestTokenWaitHonorsContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() { _, _ = c.TokenSource().Token(context.Background()) }()
-	time.Sleep(20 * time.Millisecond)
+	<-entered // the first caller now holds the refresh semaphore
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	if _, err := c.TokenSource().Token(ctx); !errors.Is(err, context.DeadlineExceeded) {
