@@ -58,8 +58,12 @@ func TestTokenCachePath(t *testing.T) {
 	if p := tokenCachePath("us", "id", ""); p != "" {
 		t.Errorf("no refresh token: got %q, want no cache", p)
 	}
-	t.Setenv("ZC_NO_TOKEN_CACHE", "1")
+	t.Setenv("ZC_NO_TOKEN_CACHE", "0")
+	if p := tokenCachePath("us", "id", "refresh-a"); p == "" {
+		t.Error("ZC_NO_TOKEN_CACHE=0: caching turned off, want on")
+	}
+	t.Setenv("ZC_NO_TOKEN_CACHE", "true")
 	if p := tokenCachePath("us", "id", "refresh-a"); p != "" {
-		t.Errorf("ZC_NO_TOKEN_CACHE set: got %q, want no cache", p)
+		t.Errorf("ZC_NO_TOKEN_CACHE=true: got %q, want no cache", p)
 	}
 }

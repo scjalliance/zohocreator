@@ -35,6 +35,11 @@ type refreshTokenSource struct {
 	userAgent    string
 	earlyRefresh time.Duration
 	onRefresh    func(token string, expiry time.Time)
+	onInvalidate func()
+
+	// refreshMu serializes refreshes, so concurrent callers holding an
+	// expired token mint one new token between them, not one each.
+	refreshMu sync.Mutex
 
 	mu      sync.Mutex
 	current string
@@ -61,6 +66,17 @@ func (r *refreshTokenSource) Token(ctx context.Context) (string, error) {
 		return tok, nil
 	}
 	r.mu.Unlock()
+
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	// Another caller may have refreshed while this one waited.
+	r.mu.Lock()
+	if r.current != "" && time.Until(r.expiry) > r.earlyRefresh {
+		tok := r.current
+		r.mu.Unlock()
+		return tok, nil
+	}
+	r.mu.Unlock()
 	return r.refresh(ctx)
 }
 
@@ -70,6 +86,9 @@ func (r *refreshTokenSource) Invalidate() {
 	r.current = ""
 	r.expiry = time.Time{}
 	r.mu.Unlock()
+	if r.onInvalidate != nil {
+		r.onInvalidate()
+	}
 }
 
 // refresh posts to the accounts token endpoint and stores the new token.

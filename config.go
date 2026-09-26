@@ -137,6 +137,12 @@ type Config struct {
 	// start hit that cap quickly. It runs synchronously on the goroutine that
 	// triggered the refresh.
 	OnTokenRefresh func(token string, expiry time.Time)
+
+	// OnTokenInvalidate, when set, is called whenever the client drops its
+	// access token, including after the server rejects it with a 401. A
+	// caller persisting tokens through OnTokenRefresh should delete its copy
+	// here, so a revoked token is not seeded into the next process.
+	OnTokenInvalidate func()
 }
 
 const defaultUserAgent = "zohocreator-go/0.1.0"

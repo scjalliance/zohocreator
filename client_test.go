@@ -350,3 +350,57 @@ func TestOnTokenRefreshAndSeededExpiry(t *testing.T) {
 		t.Fatalf("token calls after seeding = %d, want 1", n)
 	}
 }
+
+func TestConcurrentRefreshMintsOnce(t *testing.T) {
+	var tokenCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/v2/token", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenCalls, 1)
+		time.Sleep(20 * time.Millisecond)
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c, err := NewClient(Config{AccountsURL: srv.URL, BaseURL: srv.URL, ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error)
+	for range 8 {
+		go func() { _, err := c.TokenSource().Token(context.Background()); done <- err }()
+	}
+	for range 8 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Errorf("token calls = %d, want 1", n)
+	}
+}
+
+func TestUploadRejectionInvalidatesToken(t *testing.T) {
+	var invalidated int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"code":1030,"message":"Authorization Failure"}`)
+	}))
+	defer srv.Close()
+	zero := 0
+	c, err := NewClient(Config{
+		BaseURL: srv.URL, AccountsURL: srv.URL,
+		ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+		AccessToken: "revoked", AccessTokenExpiry: time.Now().Add(time.Hour),
+		MaxRetries: &zero, OnTokenInvalidate: func() { atomic.AddInt32(&invalidated, 1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.do(context.Background(), requestOptions{method: http.MethodPost, path: "/v2.1/x", rawBody: strings.NewReader("data")})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if atomic.LoadInt32(&invalidated) != 1 {
+		t.Error("rejected token was not invalidated")
+	}
+}

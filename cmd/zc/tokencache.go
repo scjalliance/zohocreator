@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 )
 
@@ -27,7 +28,7 @@ type cachedToken struct {
 // refresh token, so switching credentials never reuses another set's token
 // and the name itself reveals nothing.
 func tokenCachePath(dc, clientID, refreshToken string) string {
-	if refreshToken == "" || os.Getenv("ZC_NO_TOKEN_CACHE") != "" {
+	if off, _ := strconv.ParseBool(os.Getenv("ZC_NO_TOKEN_CACHE")); refreshToken == "" || off {
 		return ""
 	}
 	dir, err := os.UserCacheDir()
@@ -58,9 +59,6 @@ func loadToken(path string) (cachedToken, bool) {
 // storeToken writes the token with owner-only permissions, via a temp file
 // and rename so a concurrent zc never reads a half-written file.
 func storeToken(path string, ct cachedToken) error {
-	if path == "" {
-		return nil
-	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create token cache dir: %w", err)
 	}

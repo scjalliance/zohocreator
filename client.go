@@ -66,6 +66,7 @@ func newTokenSource(cfg Config, hc *http.Client) TokenSource {
 			userAgent:    cfg.UserAgent,
 			earlyRefresh: cfg.TokenEarlyRefresh,
 			onRefresh:    cfg.OnTokenRefresh,
+			onInvalidate: cfg.OnTokenInvalidate,
 		}
 		if cfg.AccessToken != "" {
 			rts.current = cfg.AccessToken
@@ -199,6 +200,11 @@ func (c *Client) do(ctx context.Context, opts requestOptions) (*doResult, error)
 			c.tokens.Invalidate()
 			attempt--
 			continue
+		}
+		if resp.StatusCode == http.StatusUnauthorized && opts.rawBody != nil {
+			// No retry is possible, but drop the rejected token so the
+			// next request, or the next process, refreshes.
+			c.tokens.Invalidate()
 		}
 		if resp.StatusCode >= 500 && attempt < maxRetries {
 			if werr := waitOrCancel(ctx, backoff(attempt)); werr != nil {
