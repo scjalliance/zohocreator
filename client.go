@@ -65,6 +65,7 @@ func newTokenSource(cfg Config, hc *http.Client) TokenSource {
 			httpClient:   hc,
 			userAgent:    cfg.UserAgent,
 			earlyRefresh: cfg.TokenEarlyRefresh,
+			onRefresh:    cfg.OnTokenRefresh,
 		}
 		if cfg.AccessToken != "" {
 			rts.current = cfg.AccessToken

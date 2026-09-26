@@ -34,6 +34,7 @@ type refreshTokenSource struct {
 	httpClient   *http.Client
 	userAgent    string
 	earlyRefresh time.Duration
+	onRefresh    func(token string, expiry time.Time)
 
 	mu      sync.Mutex
 	current string
@@ -120,8 +121,11 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 		ttl = time.Hour
 	}
 	r.expiry = time.Now().Add(ttl)
-	tok := r.current
+	tok, expiry := r.current, r.expiry
 	r.mu.Unlock()
+	if r.onRefresh != nil {
+		r.onRefresh(tok, expiry)
+	}
 	return tok, nil
 }
 

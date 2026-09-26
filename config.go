@@ -128,6 +128,15 @@ type Config struct {
 	// TokenEarlyRefresh is how long before an access token's expiry the
 	// client should proactively refresh. Defaults to 60 seconds.
 	TokenEarlyRefresh time.Duration
+
+	// OnTokenRefresh, when set, is called after every successful token
+	// refresh with the new access token and its expiry. Use it to persist the
+	// token across processes, then seed it back through AccessToken and
+	// AccessTokenExpiry; Zoho caps how many access tokens one refresh token
+	// can mint in ten minutes, so short-lived processes that refresh on every
+	// start hit that cap quickly. It runs synchronously on the goroutine that
+	// triggered the refresh.
+	OnTokenRefresh func(token string, expiry time.Time)
 }
 
 const defaultUserAgent = "zohocreator-go/0.1.0"

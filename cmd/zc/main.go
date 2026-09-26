@@ -21,6 +21,11 @@
 //	ZOHO_ACCESS_TOKEN    Optional: seed initial access token (still refreshes)
 //	ZOHO_DATA_CENTER     us | eu | in | au | jp | ca | cn | sa | ae (default us)
 //	ZOHO_ENV             production | stage | development (default production)
+//	ZC_NO_TOKEN_CACHE    Set to any value to skip the on-disk token cache
+//
+// Access tokens are cached under the user cache directory (zc/token-*.json,
+// mode 0600) and reused across runs until they near expiry, because Zoho caps
+// how many access tokens one refresh token can mint in ten minutes.
 //
 // The oauth subcommands work without ZOHO_REFRESH_TOKEN, so this CLI can be
 // used to bootstrap a fresh OAuth setup.
@@ -36,6 +41,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/scjalliance/zohocreator"
 )
@@ -106,7 +112,7 @@ func usage() {
 Auth (no access required):
   oauth authurl -client <id> [-dc us] [-redirect URI] [-scopes ...]   Print consent URL
   oauth exchange <code> -client <id> -secret <sec> -redirect URI     Trade code for tokens
-  oauth refresh                                                       Print a fresh access token
+  oauth refresh                                                       Print a valid access token (cached if fresh)
 
 Read-only:
   whoami                                             Probe credentials, list apps count
@@ -138,7 +144,8 @@ Custom APIs:
 Environment:
   ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ACCESS_TOKEN,
   ZOHO_DATA_CENTER (us|eu|in|au|jp|ca|cn|sa|ae), ZOHO_ENV (production|stage|development),
-  ZOHO_API_VERSION (v2.1 default; v2 for legacy Creator 5 tenants)`)
+  ZOHO_API_VERSION (v2.1 default; v2 for legacy Creator 5 tenants),
+  ZC_NO_TOKEN_CACHE (set to skip the on-disk access token cache)`)
 }
 
 func runWithClient(ctx context.Context, args []string, fn func(context.Context, *zohocreator.Client, []string)) {
@@ -163,6 +170,18 @@ func buildClient() (*zohocreator.Client, error) {
 		AccessToken:  os.Getenv("ZOHO_ACCESS_TOKEN"),
 		Environment:  zohocreator.Environment(envOr("ZOHO_ENV", string(zohocreator.EnvProduction))),
 		APIVersion:   zohocreator.APIVersion(envOr("ZOHO_API_VERSION", string(zohocreator.APIVersionV21))),
+	}
+	// An explicit ZOHO_ACCESS_TOKEN wins over the cache.
+	if cfg.AccessToken == "" {
+		path := tokenCachePath(string(dc), cfg.ClientID, cfg.RefreshToken)
+		if ct, ok := loadToken(path); ok {
+			cfg.AccessToken, cfg.AccessTokenExpiry = ct.AccessToken, ct.Expiry
+		}
+		cfg.OnTokenRefresh = func(tok string, exp time.Time) {
+			if err := storeToken(path, cachedToken{AccessToken: tok, Expiry: exp}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: %v\n", err)
+			}
+		}
 	}
 	return zohocreator.NewClient(cfg)
 }

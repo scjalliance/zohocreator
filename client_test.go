@@ -300,3 +300,53 @@ func (h hostRewriter) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Host = u.Host
 	return http.DefaultTransport.RoundTrip(r)
 }
+
+func TestOnTokenRefreshAndSeededExpiry(t *testing.T) {
+	var tokenCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/v2/token", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenCalls, 1)
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	})
+	mux.HandleFunc("/creator/v2.1/meta/applications", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":3000,"applications":[]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var gotTok string
+	var gotExp time.Time
+	newClient := func(seed string, seedExp time.Time) *Client {
+		zero := 0
+		c, err := NewClient(Config{
+			BaseURL: srv.URL, AccountsURL: srv.URL,
+			ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+			AccessToken: seed, AccessTokenExpiry: seedExp,
+			Environment: EnvProduction, MaxRetries: &zero,
+			OnTokenRefresh: func(tok string, exp time.Time) { gotTok, gotExp = tok, exp },
+		})
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		return c
+	}
+
+	// No seed: the first call refreshes and reports the new token.
+	if _, err := newClient("", time.Time{}).Meta.Applications(context.Background()); err != nil {
+		t.Fatalf("Applications: %v", err)
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Fatalf("token calls = %d, want 1", n)
+	}
+	if gotTok != "fresh" || time.Until(gotExp) < 59*time.Minute {
+		t.Fatalf("OnTokenRefresh got (%q, %v)", gotTok, gotExp)
+	}
+
+	// Seeded with the reported token and expiry: no further refresh.
+	if _, err := newClient(gotTok, gotExp).Meta.Applications(context.Background()); err != nil {
+		t.Fatalf("Applications: %v", err)
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Fatalf("token calls after seeding = %d, want 1", n)
+	}
+}
