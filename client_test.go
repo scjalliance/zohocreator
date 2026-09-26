@@ -300,3 +300,159 @@ func (h hostRewriter) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.Host = u.Host
 	return http.DefaultTransport.RoundTrip(r)
 }
+
+func TestOnTokenRefreshAndSeededExpiry(t *testing.T) {
+	var tokenCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/v2/token", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenCalls, 1)
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	})
+	mux.HandleFunc("/creator/v2.1/meta/applications", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"code":3000,"applications":[]}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var gotTok string
+	var gotExp time.Time
+	newClient := func(seed string, seedExp time.Time) *Client {
+		zero := 0
+		c, err := NewClient(Config{
+			BaseURL: srv.URL, AccountsURL: srv.URL,
+			ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+			AccessToken: seed, AccessTokenExpiry: seedExp,
+			Environment: EnvProduction, MaxRetries: &zero,
+			OnTokenRefresh: func(tok string, exp time.Time) { gotTok, gotExp = tok, exp },
+		})
+		if err != nil {
+			t.Fatalf("NewClient: %v", err)
+		}
+		return c
+	}
+
+	// No seed: the first call refreshes and reports the new token.
+	if _, err := newClient("", time.Time{}).Meta.Applications(context.Background()); err != nil {
+		t.Fatalf("Applications: %v", err)
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Fatalf("token calls = %d, want 1", n)
+	}
+	if gotTok != "fresh" || time.Until(gotExp) < 59*time.Minute {
+		t.Fatalf("OnTokenRefresh got (%q, %v)", gotTok, gotExp)
+	}
+
+	// Seeded with the reported token and expiry: no further refresh.
+	if _, err := newClient(gotTok, gotExp).Meta.Applications(context.Background()); err != nil {
+		t.Fatalf("Applications: %v", err)
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Fatalf("token calls after seeding = %d, want 1", n)
+	}
+}
+
+func TestConcurrentRefreshMintsOnce(t *testing.T) {
+	var tokenCalls int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/oauth/v2/token", func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&tokenCalls, 1)
+		time.Sleep(20 * time.Millisecond)
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	c, err := NewClient(Config{AccountsURL: srv.URL, BaseURL: srv.URL, ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error)
+	for range 8 {
+		go func() { _, err := c.TokenSource().Token(context.Background()); done <- err }()
+	}
+	for range 8 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := atomic.LoadInt32(&tokenCalls); n != 1 {
+		t.Errorf("token calls = %d, want 1", n)
+	}
+}
+
+func TestUploadRejectionInvalidatesToken(t *testing.T) {
+	var invalidated int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"code":1030,"message":"Authorization Failure"}`)
+	}))
+	defer srv.Close()
+	zero := 0
+	c, err := NewClient(Config{
+		BaseURL: srv.URL, AccountsURL: srv.URL,
+		ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+		AccessToken: "revoked", AccessTokenExpiry: time.Now().Add(time.Hour),
+		MaxRetries: &zero, OnTokenInvalidate: func() { atomic.AddInt32(&invalidated, 1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = c.do(context.Background(), requestOptions{method: http.MethodPost, path: "/v2.1/x", rawBody: strings.NewReader("data")})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if atomic.LoadInt32(&invalidated) != 1 {
+		t.Error("rejected token was not invalidated")
+	}
+}
+
+func TestStaleRejectionKeepsReplacementToken(t *testing.T) {
+	var invalidated int32
+	c, err := NewClient(Config{
+		AccountsURL: "http://127.0.0.1:1", BaseURL: "http://127.0.0.1:1",
+		ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+		AccessToken: "T2", AccessTokenExpiry: time.Now().Add(time.Hour),
+		OnTokenInvalidate: func() { atomic.AddInt32(&invalidated, 1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	req.Header.Set("Authorization", "Zoho-oauthtoken T1")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 0 {
+		t.Error("a 401 for T1 dropped the current token T2")
+	}
+	req.Header.Set("Authorization", "Zoho-oauthtoken T2")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 1 {
+		t.Error("a 401 for the current token did not drop it")
+	}
+	req.Header.Del("Authorization")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 2 {
+		t.Error("a 401 with no readable token did not drop the current one")
+	}
+}
+
+func TestTokenWaitHonorsContext(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(entered)
+		<-release
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, err := NewClient(Config{AccountsURL: srv.URL, BaseURL: srv.URL, ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = c.TokenSource().Token(context.Background()) }()
+	<-entered // the first caller now holds the refresh semaphore
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := c.TokenSource().Token(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("waiting caller got %v, want DeadlineExceeded", err)
+	}
+}

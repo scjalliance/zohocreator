@@ -59,7 +59,7 @@ go run ./cmd/zc oauth exchange <code> -client <client_id> -secret <client_secret
 # 3. Persist the refresh_token in .secrets/.env
 ```
 
-Only the refresh token is long-lived; access tokens are auto-refreshed by the client (60s early-refresh window by default). If you operate tokens externally, seed a static access token via `Config.AccessToken` and omit `RefreshToken` — no refresh will happen.
+Only the refresh token is long-lived; access tokens are auto-refreshed by the client (60s early-refresh window by default). Zoho caps how many access tokens one refresh token can mint in ten minutes, so `zc` caches its access token on disk (under the user cache directory, mode 0600) and reuses it across runs; set `ZC_NO_TOKEN_CACHE=1` to turn that off. Library callers can do the same with `Config.OnTokenRefresh` and `Config.OnTokenInvalidate`. If you operate tokens externally, seed a static access token via `Config.AccessToken` and omit `RefreshToken` — no refresh will happen.
 
 ## API versions
 

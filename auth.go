@@ -34,6 +34,19 @@ type refreshTokenSource struct {
 	httpClient   *http.Client
 	userAgent    string
 	earlyRefresh time.Duration
+	onRefresh    func(token string, expiry time.Time)
+	onInvalidate func()
+
+	// refreshSem serializes refreshes, so concurrent callers holding an
+	// expired token mint one new token between them, not one each. It is a
+	// channel rather than a mutex so a waiting caller can give up when its
+	// context ends.
+	refreshSem chan struct{}
+
+	// cbMu serializes onRefresh and onInvalidate. Each callback re-checks
+	// the token state under it and skips itself if a newer change has
+	// already happened, so persisted state always ends at the latest change.
+	cbMu sync.Mutex
 
 	mu      sync.Mutex
 	current string
@@ -60,19 +73,80 @@ func (r *refreshTokenSource) Token(ctx context.Context) (string, error) {
 		return tok, nil
 	}
 	r.mu.Unlock()
-	return r.refresh(ctx)
+
+	select {
+	case r.refreshSem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	// Another caller may have refreshed while this one waited.
+	r.mu.Lock()
+	if r.current != "" && time.Until(r.expiry) > r.earlyRefresh {
+		tok := r.current
+		r.mu.Unlock()
+		<-r.refreshSem
+		return tok, nil
+	}
+	r.mu.Unlock()
+	tok, expiry, err := r.refresh(ctx)
+	<-r.refreshSem
+	if err != nil {
+		return "", err
+	}
+	// Outside the semaphore; under cbMu, and only if no newer change has
+	// landed, so persisted state ends at the latest token.
+	if r.onRefresh != nil {
+		r.cbMu.Lock()
+		r.mu.Lock()
+		stillCurrent := r.current == tok
+		r.mu.Unlock()
+		if stillCurrent {
+			r.onRefresh(tok, expiry)
+		}
+		r.cbMu.Unlock()
+	}
+	return tok, nil
 }
 
 // Invalidate drops the cached token so the next call forces a refresh.
 func (r *refreshTokenSource) Invalidate() {
 	r.mu.Lock()
+	r.clearLocked()
+}
+
+// clearLocked drops the token and calls onInvalidate. The caller must hold
+// r.mu; clearLocked releases it before the callback runs.
+func (r *refreshTokenSource) clearLocked() {
 	r.current = ""
 	r.expiry = time.Time{}
 	r.mu.Unlock()
+	if r.onInvalidate == nil {
+		return
+	}
+	r.cbMu.Lock()
+	defer r.cbMu.Unlock()
+	r.mu.Lock()
+	stillCleared := r.current == ""
+	r.mu.Unlock()
+	if stillCleared {
+		r.onInvalidate()
+	}
+}
+
+// invalidateIfCurrent drops the cached token only if it is still tok. A 401
+// for a token that another request has already replaced must not throw away
+// the replacement.
+func (r *refreshTokenSource) invalidateIfCurrent(tok string) {
+	r.mu.Lock()
+	if r.current != tok {
+		r.mu.Unlock()
+		return
+	}
+	r.clearLocked()
 }
 
 // refresh posts to the accounts token endpoint and stores the new token.
-func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
+func (r *refreshTokenSource) refresh(ctx context.Context) (string, time.Time, error) {
 	form := url.Values{}
 	form.Set("refresh_token", r.refreshToken)
 	form.Set("client_id", r.clientID)
@@ -82,7 +156,7 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 	endpoint := r.accountsURL + "/oauth/v2/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("build token request: %w", err)
+		return "", time.Time{}, fmt.Errorf("build token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -90,17 +164,17 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("token request: %w", err)
+		return "", time.Time{}, fmt.Errorf("token request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read token response: %w", err)
+		return "", time.Time{}, fmt.Errorf("read token response: %w", err)
 	}
 
 	var tr tokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return "", fmt.Errorf("decode token response (http=%d): %w", resp.StatusCode, err)
+		return "", time.Time{}, fmt.Errorf("decode token response (http=%d): %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode >= 400 || tr.AccessToken == "" {
 		msg := tr.Error
@@ -110,7 +184,7 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 		if msg == "" {
 			msg = "unknown token error"
 		}
-		return "", &AuthError{Base: Error{Status: resp.StatusCode, Message: msg, Kind: "auth"}}
+		return "", time.Time{}, &AuthError{Base: Error{Status: resp.StatusCode, Message: msg, Kind: "auth"}}
 	}
 
 	r.mu.Lock()
@@ -120,9 +194,9 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 		ttl = time.Hour
 	}
 	r.expiry = time.Now().Add(ttl)
-	tok := r.current
+	tok, expiry := r.current, r.expiry
 	r.mu.Unlock()
-	return tok, nil
+	return tok, expiry, nil
 }
 
 // tokenResponse is the subset of fields we care about in /oauth/v2/token
