@@ -37,9 +37,11 @@ type refreshTokenSource struct {
 	onRefresh    func(token string, expiry time.Time)
 	onInvalidate func()
 
-	// refreshMu serializes refreshes, so concurrent callers holding an
-	// expired token mint one new token between them, not one each.
-	refreshMu sync.Mutex
+	// refreshSem serializes refreshes, so concurrent callers holding an
+	// expired token mint one new token between them, not one each. It is a
+	// channel rather than a mutex so a waiting caller can give up when its
+	// context ends.
+	refreshSem chan struct{}
 
 	mu      sync.Mutex
 	current string
@@ -67,17 +69,31 @@ func (r *refreshTokenSource) Token(ctx context.Context) (string, error) {
 	}
 	r.mu.Unlock()
 
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
+	select {
+	case r.refreshSem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 	// Another caller may have refreshed while this one waited.
 	r.mu.Lock()
 	if r.current != "" && time.Until(r.expiry) > r.earlyRefresh {
 		tok := r.current
 		r.mu.Unlock()
+		<-r.refreshSem
 		return tok, nil
 	}
 	r.mu.Unlock()
-	return r.refresh(ctx)
+	tok, expiry, err := r.refresh(ctx)
+	<-r.refreshSem
+	if err != nil {
+		return "", err
+	}
+	// Outside the semaphore, so a callback that calls back into the
+	// client cannot deadlock.
+	if r.onRefresh != nil {
+		r.onRefresh(tok, expiry)
+	}
+	return tok, nil
 }
 
 // Invalidate drops the cached token so the next call forces a refresh.
@@ -91,8 +107,20 @@ func (r *refreshTokenSource) Invalidate() {
 	}
 }
 
+// invalidateIfCurrent drops the cached token only if it is still tok. A 401
+// for a token that another request has already replaced must not throw away
+// the replacement.
+func (r *refreshTokenSource) invalidateIfCurrent(tok string) {
+	r.mu.Lock()
+	stale := r.current == tok
+	r.mu.Unlock()
+	if stale {
+		r.Invalidate()
+	}
+}
+
 // refresh posts to the accounts token endpoint and stores the new token.
-func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
+func (r *refreshTokenSource) refresh(ctx context.Context) (string, time.Time, error) {
 	form := url.Values{}
 	form.Set("refresh_token", r.refreshToken)
 	form.Set("client_id", r.clientID)
@@ -102,7 +130,7 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 	endpoint := r.accountsURL + "/oauth/v2/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("build token request: %w", err)
+		return "", time.Time{}, fmt.Errorf("build token request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -110,17 +138,17 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("token request: %w", err)
+		return "", time.Time{}, fmt.Errorf("token request: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("read token response: %w", err)
+		return "", time.Time{}, fmt.Errorf("read token response: %w", err)
 	}
 
 	var tr tokenResponse
 	if err := json.Unmarshal(body, &tr); err != nil {
-		return "", fmt.Errorf("decode token response (http=%d): %w", resp.StatusCode, err)
+		return "", time.Time{}, fmt.Errorf("decode token response (http=%d): %w", resp.StatusCode, err)
 	}
 	if resp.StatusCode >= 400 || tr.AccessToken == "" {
 		msg := tr.Error
@@ -130,7 +158,7 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 		if msg == "" {
 			msg = "unknown token error"
 		}
-		return "", &AuthError{Base: Error{Status: resp.StatusCode, Message: msg, Kind: "auth"}}
+		return "", time.Time{}, &AuthError{Base: Error{Status: resp.StatusCode, Message: msg, Kind: "auth"}}
 	}
 
 	r.mu.Lock()
@@ -142,10 +170,7 @@ func (r *refreshTokenSource) refresh(ctx context.Context) (string, error) {
 	r.expiry = time.Now().Add(ttl)
 	tok, expiry := r.current, r.expiry
 	r.mu.Unlock()
-	if r.onRefresh != nil {
-		r.onRefresh(tok, expiry)
-	}
-	return tok, nil
+	return tok, expiry, nil
 }
 
 // tokenResponse is the subset of fields we care about in /oauth/v2/token

@@ -67,6 +67,7 @@ func newTokenSource(cfg Config, hc *http.Client) TokenSource {
 			earlyRefresh: cfg.TokenEarlyRefresh,
 			onRefresh:    cfg.OnTokenRefresh,
 			onInvalidate: cfg.OnTokenInvalidate,
+			refreshSem:   make(chan struct{}, 1),
 		}
 		if cfg.AccessToken != "" {
 			rts.current = cfg.AccessToken
@@ -75,6 +76,18 @@ func newTokenSource(cfg Config, hc *http.Client) TokenSource {
 		return rts
 	}
 	return staticTokenSource{token: cfg.AccessToken}
+}
+
+// invalidateRejected drops the token a 401 response was sent with. Sources
+// that can tell which token is current skip the drop when another request
+// has already replaced it.
+func (c *Client) invalidateRejected(resp *http.Response) {
+	ts, ok := c.tokens.(interface{ invalidateIfCurrent(string) })
+	if !ok || resp.Request == nil {
+		c.tokens.Invalidate()
+		return
+	}
+	ts.invalidateIfCurrent(strings.TrimPrefix(resp.Request.Header.Get("Authorization"), "Zoho-oauthtoken "))
 }
 
 // BaseURL returns the resolved API base URL (no trailing slash).
@@ -197,14 +210,14 @@ func (c *Client) do(ctx context.Context, opts requestOptions) (*doResult, error)
 			// rawBody is nil because multipart readers are not
 			// rewindable here.
 			authRefreshAttempted = true
-			c.tokens.Invalidate()
+			c.invalidateRejected(resp)
 			attempt--
 			continue
 		}
 		if resp.StatusCode == http.StatusUnauthorized && opts.rawBody != nil {
 			// No retry is possible, but drop the rejected token so the
 			// next request, or the next process, refreshes.
-			c.tokens.Invalidate()
+			c.invalidateRejected(resp)
 		}
 		if resp.StatusCode >= 500 && attempt < maxRetries {
 			if werr := waitOrCancel(ctx, backoff(attempt)); werr != nil {

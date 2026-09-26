@@ -21,7 +21,7 @@
 //	ZOHO_ACCESS_TOKEN    Optional: seed initial access token (still refreshes)
 //	ZOHO_DATA_CENTER     us | eu | in | au | jp | ca | cn | sa | ae (default us)
 //	ZOHO_ENV             production | stage | development (default production)
-//	ZC_NO_TOKEN_CACHE    Set to 1 or true to skip the on-disk token cache
+//	ZC_NO_TOKEN_CACHE    Set (to anything but 0/false) to skip the token cache
 //
 // Access tokens are cached under the user cache directory (zc/token-*.json,
 // mode 0600) and reused across runs until they near expiry, because Zoho caps
@@ -145,7 +145,7 @@ Environment:
   ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN, ZOHO_ACCESS_TOKEN,
   ZOHO_DATA_CENTER (us|eu|in|au|jp|ca|cn|sa|ae), ZOHO_ENV (production|stage|development),
   ZOHO_API_VERSION (v2.1 default; v2 for legacy Creator 5 tenants),
-  ZC_NO_TOKEN_CACHE (1 or true skips the on-disk access token cache)`)
+  ZC_NO_TOKEN_CACHE (any value but 0/false skips the on-disk token cache)`)
 }
 
 func runWithClient(ctx context.Context, args []string, fn func(context.Context, *zohocreator.Client, []string)) {
@@ -172,12 +172,10 @@ func buildClient() (*zohocreator.Client, error) {
 		APIVersion:   zohocreator.APIVersion(envOr("ZOHO_API_VERSION", string(zohocreator.APIVersionV21))),
 	}
 	if path := tokenCachePath(string(dc), cfg.ClientID, cfg.RefreshToken); path != "" {
-		// An explicit ZOHO_ACCESS_TOKEN wins over the cached one, but
-		// refreshes are still cached either way.
-		if cfg.AccessToken == "" {
-			if ct, ok := loadToken(path); ok {
-				cfg.AccessToken, cfg.AccessTokenExpiry = ct.AccessToken, ct.Expiry
-			}
+		// A fresh cached token beats ZOHO_ACCESS_TOKEN: that variable has no
+		// expiry, so the client would refresh it on first use anyway.
+		if ct, ok := loadToken(path); ok {
+			cfg.AccessToken, cfg.AccessTokenExpiry = ct.AccessToken, ct.Expiry
 		}
 		cfg.OnTokenRefresh = func(tok string, exp time.Time) {
 			if err := storeToken(path, cachedToken{AccessToken: tok, Expiry: exp}); err != nil {

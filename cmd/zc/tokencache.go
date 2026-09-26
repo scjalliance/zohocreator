@@ -28,7 +28,7 @@ type cachedToken struct {
 // refresh token, so switching credentials never reuses another set's token
 // and the name itself reveals nothing.
 func tokenCachePath(dc, clientID, refreshToken string) string {
-	if off, _ := strconv.ParseBool(os.Getenv("ZC_NO_TOKEN_CACHE")); refreshToken == "" || off {
+	if refreshToken == "" || cacheDisabled(os.Getenv("ZC_NO_TOKEN_CACHE")) {
 		return ""
 	}
 	dir, err := os.UserCacheDir()
@@ -37,6 +37,17 @@ func tokenCachePath(dc, clientID, refreshToken string) string {
 	}
 	sum := sha256.Sum256([]byte(dc + "\x00" + clientID + "\x00" + refreshToken))
 	return filepath.Join(dir, "zc", "token-"+hex.EncodeToString(sum[:8])+".json")
+}
+
+// cacheDisabled reports whether ZC_NO_TOKEN_CACHE turns the cache off. Any
+// value turns it off except an empty one or one strconv reads as false, so
+// "yes" and "on" still opt out while "0" and "false" keep caching on.
+func cacheDisabled(v string) bool {
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	return err != nil || b
 }
 
 // loadToken returns the cached token when the file exists and the token has

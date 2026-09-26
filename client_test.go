@@ -404,3 +404,48 @@ func TestUploadRejectionInvalidatesToken(t *testing.T) {
 		t.Error("rejected token was not invalidated")
 	}
 }
+
+func TestStaleRejectionKeepsReplacementToken(t *testing.T) {
+	var invalidated int32
+	c, err := NewClient(Config{
+		AccountsURL: "http://127.0.0.1:1", BaseURL: "http://127.0.0.1:1",
+		ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh",
+		AccessToken: "T2", AccessTokenExpiry: time.Now().Add(time.Hour),
+		OnTokenInvalidate: func() { atomic.AddInt32(&invalidated, 1) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest(http.MethodGet, "http://x", nil)
+	req.Header.Set("Authorization", "Zoho-oauthtoken T1")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 0 {
+		t.Error("a 401 for T1 dropped the current token T2")
+	}
+	req.Header.Set("Authorization", "Zoho-oauthtoken T2")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 1 {
+		t.Error("a 401 for the current token did not drop it")
+	}
+}
+
+func TestTokenWaitHonorsContext(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		fmt.Fprint(w, `{"access_token":"fresh","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	defer close(release)
+	c, err := NewClient(Config{AccountsURL: srv.URL, BaseURL: srv.URL, ClientID: "id", ClientSecret: "sec", RefreshToken: "refresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = c.TokenSource().Token(context.Background()) }()
+	time.Sleep(20 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := c.TokenSource().Token(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("waiting caller got %v, want DeadlineExceeded", err)
+	}
+}
