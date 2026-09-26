@@ -427,6 +427,11 @@ func TestStaleRejectionKeepsReplacementToken(t *testing.T) {
 	if atomic.LoadInt32(&invalidated) != 1 {
 		t.Error("a 401 for the current token did not drop it")
 	}
+	req.Header.Del("Authorization")
+	c.invalidateRejected(&http.Response{Request: req})
+	if atomic.LoadInt32(&invalidated) != 2 {
+		t.Error("a 401 with no readable token did not drop the current one")
+	}
 }
 
 func TestTokenWaitHonorsContext(t *testing.T) {

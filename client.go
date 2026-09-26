@@ -87,7 +87,14 @@ func (c *Client) invalidateRejected(resp *http.Response) {
 		c.tokens.Invalidate()
 		return
 	}
-	ts.invalidateIfCurrent(strings.TrimPrefix(resp.Request.Header.Get("Authorization"), "Zoho-oauthtoken "))
+	sent, found := strings.CutPrefix(resp.Request.Header.Get("Authorization"), "Zoho-oauthtoken ")
+	if !found || sent == "" {
+		// The header is gone (a cross-host redirect strips it), so the
+		// rejected token is unknown; drop whatever is current.
+		c.tokens.Invalidate()
+		return
+	}
+	ts.invalidateIfCurrent(sent)
 }
 
 // BaseURL returns the resolved API base URL (no trailing slash).
